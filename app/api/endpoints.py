@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from app.models.job import Job
 from app.tasks.worker import generate_media
@@ -7,17 +7,18 @@ from app.tasks.worker import generate_media
 router = APIRouter()
 
 class GenerateRequest(BaseModel):
-    prompt: str
-    parameters: dict
+    prompt: str = Field(..., description="The text prompt to generate an image from.")
+    parameters: dict = Field(..., description="Additional generation parameters such as aspect_ratio, output_format.")
 
 class GenerateResponse(BaseModel):
-    job_id: UUID
-    media_url: str | None
+    job_id: UUID = Field(..., description="The unique identifier of the queued image generation job.")
+    media_url: str | None = Field(None, description="The URL of the generated image once ready.")
 
 class StatusResponse(BaseModel):
-    status: str
-    media_url: str | None
-    error: str | None
+    status: str = Field(..., description="Current status of the job (e.g., queued, completed, failed).")
+    media_url: str | None = Field(None, description="URL to generated media if available.")
+    error: str | None = Field(None, description="Error message if job failed.")
+    
 
 @router.post("/generate", response_model=GenerateResponse)
 async def generate(request: GenerateRequest):

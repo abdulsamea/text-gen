@@ -6,8 +6,10 @@ from io import BytesIO
 import re
 from app.tasks.job_handler import JobHandler
 from app.tasks.media_client import MediaClient
+from app.tasks.retry_handler import RetryHandler
 from PIL import Image, ImageDraw, ImageFont
 from app.tasks.replicate_client import ReplicateClient
+
 load_dotenv()
 
 REDIS_BROKER_URL = os.getenv("REDIS_URL")
@@ -22,7 +24,6 @@ class MediaGenerationTask(Task):
     retry_backoff_max = 60
 
     def run(self, job_id, prompt, parameters):
-        # Celery runs this in a sync context; bridge to async.
         return asyncio.run(self.async_run(job_id, prompt, parameters))
 
     async def async_run(self, job_id, prompt, parameters):
@@ -31,36 +32,43 @@ class MediaGenerationTask(Task):
             safe_prompt = re.sub(r'[^a-zA-Z0-9_-]', '_', prompt)[:50]
             filename = f"output_{safe_prompt}.png"
 
-            # Create image via replicate
-            image_bytes = replicate_client.generate_image(prompt, parameters)
+            async def replicate_generate():
+                # Call replicate API to generate image bytes
+                return replicate_client.generate_image(prompt, parameters)
+
+            image_bytes = await RetryHandler.run_with_exponential_backoff(
+                replicate_generate,
+                max_retries=5,
+                base_delay=1,
+                max_delay=60
+            )
+
             buf = BytesIO(image_bytes)
             buf.seek(0)
 
-            for attempt in range(1, 6):
-                try:
-                    s3_url = media_client.upload_image(filename, buf)
-                    print(f"Uploaded simple image to {s3_url}")
-                    break
-                except Exception as e:
-                    print(f"S3 upload attempt {attempt} failed: {e}")
-                    await JobHandler.increment_retry_count(job_id)
-                    if attempt == 5:
-                        raise
-                    await asyncio.sleep(2 ** attempt)
-                    buf.seek(0)
+            async def s3_upload():
+                s3_url = media_client.upload_image(filename, buf)
+                return s3_url
 
-            for attempt in range(1, 6):
-                try:
-                    await JobHandler.set_status(job_id, "completed", media_url=s3_url, error=None)
-                    break
-                except Exception as e:
-                    print(f"DB update attempt {attempt} failed: {e}")
-                    await JobHandler.increment_retry_count(job_id)
-                    if attempt == 5:
-                        raise
-                    await asyncio.sleep(2 ** attempt)
+            s3_url = await RetryHandler.run_with_exponential_backoff(
+                s3_upload,
+                max_retries=5,
+                base_delay=1,
+                max_delay=60
+            )
+
+            async def db_update():
+                await JobHandler.set_status(job_id, "completed", media_url=s3_url, error=None)
+
+            await RetryHandler.run_with_exponential_backoff(
+                db_update,
+                max_retries=5,
+                base_delay=1,
+                max_delay=60
+            )
 
             return s3_url
+
         except Exception as exc:
             await JobHandler.set_status(job_id, "failed", error=str(exc))
             raise
