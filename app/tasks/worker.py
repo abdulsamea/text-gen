@@ -7,12 +7,13 @@ import re
 from app.tasks.job_handler import JobHandler
 from app.tasks.media_client import MediaClient
 from PIL import Image, ImageDraw, ImageFont
-
+from app.tasks.replicate_client import ReplicateClient
 load_dotenv()
 
 REDIS_BROKER_URL = os.getenv("REDIS_URL")
 celery_app = Celery("tasks", broker=REDIS_BROKER_URL)
 media_client = MediaClient()
+replicate_client = ReplicateClient()
 
 class MediaGenerationTask(Task):
     autoretry_for = (Exception,)
@@ -30,13 +31,9 @@ class MediaGenerationTask(Task):
             safe_prompt = re.sub(r'[^a-zA-Z0-9_-]', '_', prompt)[:50]
             filename = f"output_{safe_prompt}.png"
 
-            # Create image
-            img = Image.new('RGB', (512, 512), color=(73, 109, 137))
-            d = ImageDraw.Draw(img)
-            font = ImageFont.load_default()
-            d.text((10, 250), prompt, fill=(255, 255, 0), font=font)
-            buf = BytesIO()
-            img.save(buf, format='PNG')
+            # Create image via replicate
+            image_bytes = replicate_client.generate_image(prompt, parameters)
+            buf = BytesIO(image_bytes)
             buf.seek(0)
 
             for attempt in range(1, 6):
