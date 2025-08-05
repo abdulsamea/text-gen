@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+pydantic
+celery[redis]
+tortoise-orm
+asyncpg
+boto3
+python-dotenv
+alembic
+aiofiles
+httpx
+psycopg2-binary
+Pillow
+requests
+gunicorn
