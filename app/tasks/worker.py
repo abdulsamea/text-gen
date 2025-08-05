@@ -32,12 +32,12 @@ class MediaGenerationTask(Task):
             safe_prompt = re.sub(r'[^a-zA-Z0-9_-]', '_', prompt)[:50]
             filename = f"output_{safe_prompt}.png"
 
-            async def replicate_generate():
+            async def text_to_image_generation():
                 # Call replicate API to generate image bytes
                 return replicate_client.generate_image(prompt, parameters)
 
             image_bytes = await RetryHandler.run_with_exponential_backoff(
-                replicate_generate,
+                text_to_image_generation,
                 max_retries=5,
                 base_delay=1,
                 max_delay=60
